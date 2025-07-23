@@ -12,10 +12,10 @@ class SteamReader {
         this.watchers = new Set();
 
         if (!this.steamPath) {
-            console.warn(' Chemin Steam introuvable ! Certaines fonctionnalités ne fonctionneront pas.');
+            console.warn('️ Chemin Steam introuvable ! Certaines fonctionnalités ne fonctionneront pas.');
         }
         if (!this.apiKey) {
-            console.warn(' Clé API Steam non fournie. Certaines fonctionnalités ne fonctionneront pas.');
+            console.warn('️ Clé API Steam non fournie. Certaines fonctionnalités ne fonctionneront pas.');
         }
     }
 
@@ -77,7 +77,7 @@ class SteamReader {
                 const info = await this.fetchSteamUserInfo(steamId);
                 if (info) personaName = info.personaname;
             } catch {
-                console.warn(` Impossible de récupérer le nom de ${steamId}`);
+                console.warn(`️ Impossible de récupérer le nom de ${steamId}`);
             }
 
             users.push({ steamId, personaName });
@@ -86,7 +86,69 @@ class SteamReader {
         return users;
     }
 
-    getUserGames() {
+    async getUserGames(steamId64) {
+        if (!this.apiKey) {
+            console.warn('️ Clé API manquante, récupération locale uniquement');
+            return this.getLocalGames();
+        }
+
+        try {
+            console.log(`📥 Récupération de tous les jeux pour ${steamId64}...`);
+
+            const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${this.apiKey}&steamid=${steamId64}&include_appinfo=true&include_played_free_games=true&format=json`;
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.warn(`Erreur API: ${response.status}`);
+                return this.getLocalGames();
+            }
+
+            const data = await response.json();
+
+            if (!data.response || !data.response.games) {
+                console.warn(' Pas de jeux trouvés ou profil privé');
+                return this.getLocalGames();
+            }
+
+            const games = data.response.games.map(game => ({
+                appid: game.appid.toString(),
+                name: game.name,
+                playtime: game.playtime_forever,
+                playtime_2weeks: game.playtime_2weeks || 0,
+                img_icon_url: game.img_icon_url,
+                img_logo_url: game.img_logo_url,
+                has_community_visible_stats: game.has_community_visible_stats,
+                isInstalled: false
+            }));
+
+            console.log(` ${games.length} jeux trouvés via l'API`);
+
+            // Marquer les jeux installés localement
+            const localGames = this.getLocalGames();
+            const localAppIds = new Set(localGames.map(g => g.appid));
+
+            games.forEach(game => {
+                if (localAppIds.has(game.appid)) {
+                    game.isInstalled = true;
+                }
+            });
+
+            games.sort((a, b) => {
+                if (a.isInstalled !== b.isInstalled) {
+                    return b.isInstalled - a.isInstalled;
+                }
+                return b.playtime - a.playtime;
+            });
+
+            return games;
+
+        } catch (err) {
+            console.error(' Erreur récupération jeux via API:', err.message);
+            return this.getLocalGames();
+        }
+    }
+
+    getLocalGames() {
         if (!this.steamPath) return [];
 
         const libraryfoldersPath = path.join(this.steamPath, 'steamapps', 'libraryfolders.vdf');
@@ -121,13 +183,41 @@ class SteamReader {
                     const appIdMatch = manifest.match(/"appid"\s+"(\d+)"/);
                     const nameMatch = manifest.match(/"name"\s+"([^"]+)"/);
                     if (appIdMatch && nameMatch) {
-                        games.push({ appid: appIdMatch[1], name: nameMatch[1] });
+                        games.push({
+                            appid: appIdMatch[1],
+                            name: nameMatch[1],
+                            isInstalled: true
+                        });
                     }
                 }
             }
         }
 
         return games;
+    }
+
+    async getGlobalAchievementPercentages(appid) {
+        try {
+            const url = `https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid=${appid}&format=json`;
+
+            const response = await fetch(url);
+            if (!response.ok) return null;
+
+            const data = await response.json();
+
+            if (data.achievementpercentages && data.achievementpercentages.achievements) {
+                const percentages = {};
+                data.achievementpercentages.achievements.forEach(ach => {
+                    percentages[ach.name] = parseFloat(ach.percent);
+                });
+                return percentages;
+            }
+
+            return null;
+        } catch (err) {
+            console.error(' Erreur récupération pourcentages:', err);
+            return null;
+        }
     }
 
     async getUserAchievements(steamId, appid) {
@@ -142,11 +232,11 @@ class SteamReader {
 
         try {
             const url = `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${this.apiKey}&steamid=${steamId}&appid=${appid}&l=french`;
-            console.log(' Appel API:', url.replace(this.apiKey, 'XXX'));
+            console.log('🌐 Appel API:', url.replace(this.apiKey, 'XXX'));
 
             const response = await fetch(url);
             if (!response.ok) {
-                console.warn(` Requête API Steam échouée : HTTP ${response.status}`);
+                console.warn(`️ Requête API Steam échouée : HTTP ${response.status}`);
                 return null;
             }
 
@@ -158,21 +248,165 @@ class SteamReader {
             }
 
             if (data.playerstats.error) {
-                console.warn(' Erreur API Steam:', data.playerstats.error);
+                console.warn('️ Erreur API Steam:', data.playerstats.error);
                 return null;
             }
 
             const achievements = data.playerstats.achievements || [];
 
             if (achievements.length === 0) {
-                console.info(` Aucun succès trouvé pour steamId=${steamId} appid=${appid}`);
+                console.info(`️ Aucun succès trouvé pour steamId=${steamId} appid=${appid}`);
             } else {
                 console.log(` ${achievements.length} succès récupérés en français`);
+
+                const [percentages, gameInfo, userStats] = await Promise.all([
+                    this.getGlobalAchievementPercentages(appid),
+                    this.getGameInfo(appid),
+                    this.getUserGameStats(steamId, appid)
+                ]);
+
+                achievements.forEach(ach => {
+                    if (percentages && percentages[ach.apiname]) {
+                        ach.percentage = percentages[ach.apiname];
+                    }
+
+                    if (ach.achieved === 1 && ach.unlocktime) {
+                        ach.legitimacy = this.checkAchievementLegitimacy(ach, userStats, gameInfo);
+                    }
+                });
             }
 
             return achievements;
         } catch (err) {
             console.error(' Erreur récupération succès:', err.message);
+            return null;
+        }
+    }
+
+    checkAchievementLegitimacy(achievement, userStats, gameInfo) {
+        const legitimacy = {
+            score: 100,
+            issues: [],
+            status: 'legitimate'
+        };
+
+        if (userStats && userStats.game_purchase_time && achievement.unlocktime < userStats.game_purchase_time) {
+            legitimacy.score -= 100;
+            legitimacy.issues.push('Débloqué avant l\'achat du jeu');
+            legitimacy.status = 'cheated';
+            return legitimacy;
+        }
+
+        if (userStats && userStats.playtime_at_unlock !== undefined && userStats.playtime_at_unlock === 0) {
+            legitimacy.score -= 50;
+            legitimacy.issues.push('Débloqué avec 0 minute de jeu');
+        }
+
+        if (userStats && userStats.achievements_timeline) {
+            const unlockTime = achievement.unlocktime;
+            const nearbyUnlocks = userStats.achievements_timeline.filter(time =>
+                Math.abs(time - unlockTime) < 60
+            );
+
+            if (nearbyUnlocks.length > 10) {
+                legitimacy.score -= 40;
+                legitimacy.issues.push(`${nearbyUnlocks.length} succès débloqués en même temps`);
+            } else if (nearbyUnlocks.length > 5) {
+                legitimacy.score -= 20;
+                legitimacy.issues.push(`${nearbyUnlocks.length} succès débloqués rapidement`);
+            }
+        }
+
+        if (achievement.percentage && achievement.percentage < 0.1) {
+            if (userStats && userStats.playtime_at_unlock < 60) { // Moins d'1h de jeu
+                legitimacy.score -= 30;
+                legitimacy.issues.push('Succès très rare débloqué trop tôt');
+            }
+        }
+
+        const unlockSecond = achievement.unlocktime % 60;
+        if (userStats && userStats.unlock_seconds_pattern) {
+            const sameSecondCount = userStats.unlock_seconds_pattern[unlockSecond] || 0;
+            if (sameSecondCount > 20) {
+                legitimacy.score -= 50;
+                legitimacy.issues.push('Pattern de déblocage suspect (même seconde)');
+            }
+        }
+
+        if (legitimacy.score <= 0) {
+            legitimacy.status = 'cheated';
+            legitimacy.score = 0;
+        } else if (legitimacy.score < 70) {
+            legitimacy.status = 'suspicious';
+        }
+
+        return legitimacy;
+    }
+    async getUserGameStats(steamId, appid) {
+        try {
+            const [achievementsRes, ownedGamesRes] = await Promise.all([
+                fetch(`https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${this.apiKey}&steamid=${steamId}&appid=${appid}`),
+                fetch(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${this.apiKey}&steamid=${steamId}&include_appinfo=true&include_played_free_games=true`)
+            ]);
+
+            if (!achievementsRes.ok || !ownedGamesRes.ok) return null;
+
+            const [achievementsData, ownedGamesData] = await Promise.all([
+                achievementsRes.json(),
+                ownedGamesRes.json()
+            ]);
+
+            const playerAchievements = achievementsData?.playerstats?.achievements || [];
+            const ownedGames = ownedGamesData?.response?.games || [];
+
+            const targetGame = ownedGames.find(game => game.appid.toString() === appid.toString());
+            const playtime_at_unlock = targetGame?.playtime_forever || 0;
+
+            const unlockTimes = playerAchievements
+                .filter(a => a.achieved === 1 && a.unlocktime)
+                .map(a => a.unlocktime);
+
+            const unlock_seconds_pattern = {};
+            for (const ts of unlockTimes) {
+                const second = ts % 60;
+                unlock_seconds_pattern[second] = (unlock_seconds_pattern[second] || 0) + 1;
+            }
+
+            const game_purchase_time = unlockTimes.length ? unlockTimes[0] - 1800 : null;
+
+            return {
+                playtime_at_unlock,
+                achievements_timeline: unlockTimes,
+                unlock_seconds_pattern,
+                game_purchase_time
+            };
+
+        } catch (err) {
+            console.error('Erreur récupération des stats utilisateur:', err.message);
+            return null;
+        }
+    }
+
+    async getGameInfo(appid) {
+        try {
+            const url = `https://store.steampowered.com/api/appdetails?appids=${appid}`;
+            const response = await fetch(url);
+
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            const gameData = data[appid];
+
+            if (!gameData || !gameData.success) return null;
+
+            return {
+                name: gameData.data.name,
+                release_date: gameData.data.release_date?.date,
+                achievements_total: gameData.data.achievements?.total || 0
+            };
+
+        } catch (err) {
+            console.error(' Erreur récupération infos jeu:', err);
             return null;
         }
     }
@@ -236,58 +470,30 @@ class SteamReader {
             const data = await response.json();
             return data.response.players[0] || null;
         } catch (err) {
-            console.error(' Erreur API Steam:', err.message);
+            console.error('Erreur API Steam:', err.message);
             return null;
         }
     }
 
-    async fetchUserOwnedGames(steamId64) {
-        if (!this.apiKey) throw new Error('Clé API manquante');
-
-        const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${this.apiKey}&steamid=${steamId64}&include_appinfo=true&include_played_free_games=true`;
+    async getGameStats(steamId, appid) {
+        if (!this.apiKey) return null;
 
         try {
+            const url = `https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?key=${this.apiKey}&steamid=${steamId}&appid=${appid}`;
+
             const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) return null;
 
             const data = await response.json();
-            return data.response.games?.map(game => ({
-                appid: game.appid,
-                name: game.name
-            })) || [];
+            return data.playerstats || null;
+
         } catch (err) {
-            console.error(' Impossible de récupérer les jeux via API:', err.message);
-            return [];
+            console.error('Erreur récupération stats:', err);
+            return null;
         }
     }
 }
 
-/* test
-if (require.main === module) {
-    (async () => {
-        const API_KEY = 'TA_CLE_API_STEAM_ICI';
-        const steamIdTest = '76561197960435530';
-        const appidTest = 440;
 
-        const reader = new SteamReader(API_KEY);
-
-        console.log('Steam Path détecté:', reader.steamPath);
-
-        const achievements = await reader.getUserAchievements(steamIdTest, appidTest);
-        if (!achievements) {
-            console.log('Aucun succès trouvé ou erreur lors de la récupération.');
-        } else if (achievements.length === 0) {
-            console.log('Aucun succès débloqué pour ce joueur et ce jeu.');
-        } else {
-            console.log(`Succès (${achievements.length}) pour le jeu ${appidTest} :`);
-            achievements.forEach(a => {
-                console.log(` - ${a.apiname} : ${a.achieved ? 'Débloqué' : 'Non débloqué'}`);
-                console.log(`   Nom: ${a.name}`);
-                console.log(`   Description: ${a.description}`);
-            });
-        }
-    })();
-}
-*/
 
 module.exports = SteamReader;

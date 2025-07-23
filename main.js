@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const SteamReader = require('./steam-reader');
+const SteamReader = require('./steam-reader'); // Classe SteamReader
 
 console.log('Main process démarré !');
 
@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
     console.log(' Chemin Steam détecté:', steamReader.steamPath);
 
     try {
-        const testSteamId64 = '76561198006409530';
+        const testSteamId64 = '76561198006409530'; // exemple
         const userInfo = await steamReader.fetchSteamUserInfo(testSteamId64);
         console.log('Test API Steam user info:', userInfo);
     } catch (err) {
@@ -59,7 +59,7 @@ ipcMain.handle('get-steam-users', async () => {
         ensureSteamReader();
         console.log(' get-steam-users appelé - VRAIES données');
         const users = await steamReader.getSteamUsers();
-        console.log(`👥 ${users.length} utilisateurs trouvés`);
+        console.log(` ${users.length} utilisateurs trouvés`);
         return { users, consent: true };
     } catch (err) {
         console.error(err);
@@ -72,7 +72,7 @@ ipcMain.handle('get-user-games', async (event, userId) => {
         ensureSteamReader();
         console.log(' get-user-games appelé pour:', userId);
         const games = await steamReader.getUserGames(userId);
-        console.log(` ${games.length} jeux trouvés`);
+        console.log(`${games.length} jeux trouvés`);
         return games;
     } catch (err) {
         console.error(err);
@@ -97,9 +97,9 @@ ipcMain.handle('get-achievements', async (event, userId, gameId) => {
             };
         }
 
-        console.log(`🏆 ${achievements.length} succès trouvés depuis l'API`);
+        console.log(` ${achievements.length} succès trouvés depuis l'API`);
 
-        console.log('📊 Exemples de succès reçus:');
+        console.log(' Exemples de succès reçus:');
         achievements.slice(0, 3).forEach((ach, i) => {
             console.log(`  ${i+1}. ${ach.name || ach.apiname}:`);
             console.log(`     - achieved: ${ach.achieved} (type: ${typeof ach.achieved})`);
@@ -109,16 +109,26 @@ ipcMain.handle('get-achievements', async (event, userId, gameId) => {
         const formattedAchievements = achievements.map(ach => {
             const isAchieved = ach.achieved === 1 || ach.achieved === true || ach.achieved === "1";
 
-            return {
+            const formatted = {
                 id: ach.apiname,
                 name: ach.name || ach.apiname,
                 description: ach.description || '',
                 achieved: isAchieved,
-                unlocked: isAchieved,
+                unlocked: isAchieved, // Pour compatibilité avec le frontend
                 unlockTime: ach.unlocktime || null,
                 displayName: ach.name || ach.apiname,
-                globalPercentage: 0
+                globalPercentage: ach.percentage || 0,
+                legitimacy: ach.legitimacy || null
             };
+
+            if (ach.legitimacy && ach.legitimacy.status !== 'legitimate') {
+                console.log(` Succès suspect détecté: ${ach.name}`);
+                console.log(`   Status: ${ach.legitimacy.status}`);
+                console.log(`   Score: ${ach.legitimacy.score}/100`);
+                console.log(`   Problèmes: ${ach.legitimacy.issues.join(', ')}`);
+            }
+
+            return formatted;
         });
 
         const unlocked = formattedAchievements.filter(a => a.achieved).length;
@@ -157,6 +167,7 @@ ipcMain.handle('start-watching', async (event, userId, gameId) => {
                 return;
             }
 
+            // Formatter et envoyer les données
             const formattedAchievements = achievements.map(ach => ({
                 id: ach.apiname,
                 name: ach.name || ach.apiname,
@@ -192,7 +203,7 @@ ipcMain.handle('start-watching', async (event, userId, gameId) => {
 ipcMain.handle('fetch-steam-user-info', async (event, steamId64) => {
     try {
         ensureSteamReader();
-        console.log('📞 fetch-steam-user-info appelé pour:', steamId64);
+        console.log(' fetch-steam-user-info appelé pour:', steamId64);
         if (!steamReader.apiKey) {
             return { error: 'Clé API Steam non définie' };
         }

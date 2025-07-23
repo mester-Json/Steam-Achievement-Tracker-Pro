@@ -7,7 +7,7 @@
     <title>Steam Achievement Tracker Pro</title>
 </head>
 <body>
-<h1>🏆 Steam Achievement Tracker Pro</h1>
+<h1> Steam Achievement Tracker Pro</h1>
 
 <div id="status" class="info">Initialisation...</div>
 
@@ -33,11 +33,9 @@
     <button onclick="changeUser()"> Changer d'utilisateur</button>
 </div>
 
-<!-- Container pour les succès avec barre de progression -->
 <div id="achievements-container" class="achievements-header" style="display: none;">
     <h3 id="game-title"> Succès</h3>
 
-    <!-- Statistiques -->
     <div class="progress-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 20px;">
         <div class="stat-box" style="background: rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 15px; text-align: center;">
             <h4 style="color: #888; font-size: 0.9rem; margin-bottom: 5px; font-weight: normal;">Total</h4>
@@ -106,10 +104,10 @@
             status.className = "info";
 
             const result = await window.steamAPI.getSteamUsers();
-            console.log(' Utilisateurs Steam:', result);
+            console.log('👥 Utilisateurs Steam:', result);
 
             if (!result.users || result.users.length === 0) {
-                status.textContent = " Aucun compte Steam détecté.";
+                status.textContent = "️ Aucun compte Steam détecté.";
                 status.className = "warning";
                 return;
             }
@@ -118,7 +116,7 @@
             displayUsers();
 
         } catch (error) {
-            console.error('Erreur init:', error);
+            console.error(' Erreur init:', error);
             status.textContent = ` Erreur: ${error.message}`;
             status.className = "error";
         }
@@ -145,7 +143,6 @@
 
             const displayName = user.personaName || user.accountName || `Utilisateur ${index + 1}`;
 
-            // Avatar SVG au lieu d'emoji
             const avatarSvg = `<svg class="user-avatar" viewBox="0 0 24 24" fill="#4CAF50" style="width: 60px; height: 60px;">
                 <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
             </svg>`;
@@ -162,7 +159,7 @@
         });
 
         userSelection.style.display = 'block';
-        document.getElementById('status').textContent = " Sélectionnez votre compte Steam";
+        document.getElementById('status').textContent = "👤 Sélectionnez votre compte Steam";
         document.getElementById('status').className = "info";
     }
 
@@ -193,7 +190,7 @@
             userGames = games || [];
 
             if (userGames.length === 0) {
-                document.getElementById('status').textContent = "️ Aucun jeu détecté pour cet utilisateur.";
+                document.getElementById('status').textContent = " Aucun jeu détecté pour cet utilisateur.";
                 document.getElementById('status').className = "warning";
                 return;
             }
@@ -204,7 +201,7 @@
 
         } catch (error) {
             console.error(' Erreur récupération jeux:', error);
-            document.getElementById('status').textContent = `Erreur lors du chargement des jeux: ${error.message}`;
+            document.getElementById('status').textContent = ` Erreur lors du chargement des jeux: ${error.message}`;
             document.getElementById('status').className = "error";
         }
     }
@@ -232,7 +229,7 @@
 
         gameSelection.style.display = 'block';
         document.getElementById('controls').style.display = 'block';
-        document.getElementById('status').textContent = '🎮 Sélectionnez un jeu';
+        document.getElementById('status').textContent = ' Sélectionnez un jeu';
         document.getElementById('status').className = "info";
     }
 
@@ -250,7 +247,7 @@
 
     async function getAchievements(steamId, appId) {
         try {
-            document.getElementById('status').textContent = `Chargement des succès...`;
+            document.getElementById('status').textContent = ` Chargement des succès ...`;
             document.getElementById('status').className = "info loading";
 
             const result = await window.steamAPI.getAchievements(steamId, appId);
@@ -260,7 +257,7 @@
                 document.getElementById('achievements').innerHTML = `<p class="no-data">Aucun succès trouvé pour ce jeu.</p>`;
                 document.getElementById('achievements-container').style.display = 'none';
                 document.getElementById('filter-container').style.display = 'none';
-                document.getElementById('status').textContent = "Aucun succès trouvé";
+                document.getElementById('status').textContent = " Aucun succès trouvé";
                 document.getElementById('status').className = "warning";
                 return;
             }
@@ -279,7 +276,7 @@
             document.getElementById('status').className = "info";
 
         } catch (error) {
-            console.error(' Erreur récupération succès:', error);
+            console.error('Erreur récupération succès:', error);
             document.getElementById('achievements').innerHTML = `<p class="no-data">Erreur lors de la récupération des succès.</p>`;
             document.getElementById('achievements-container').style.display = 'none';
             document.getElementById('filter-container').style.display = 'none';
@@ -332,21 +329,75 @@
         filteredAchievements.forEach(ach => {
             const isUnlocked = ach.unlocked || ach.achieved;
             const div = document.createElement('div');
-            div.className = `achievement ${isUnlocked ? '' : 'locked'}`;
+
+            let achievementClass = 'achievement';
+            let borderColor = 'rgba(255, 255, 255, 0.1)';
+            let backgroundColor = 'rgba(42, 45, 49, 0.6)';
+
+            if (isUnlocked) {
+                if (ach.legitimacy) {
+                    switch (ach.legitimacy.status) {
+                        case 'cheated':
+                            achievementClass += ' suspicious';
+                            borderColor = 'rgba(244, 67, 54, 0.5)';
+                            backgroundColor = 'rgba(49, 26, 26, 0.9)';
+                            break;
+                        case 'suspicious':
+                            achievementClass += ' suspicious';
+                            borderColor = 'rgba(255, 152, 0, 0.5)';
+                            backgroundColor = 'rgba(49, 39, 26, 0.8)';
+                            break;
+                        default:
+                            borderColor = 'rgba(76, 175, 80, 0.5)';
+                            backgroundColor = 'rgba(26, 46, 26, 0.8)';
+                    }
+                } else {
+                    borderColor = 'rgba(76, 175, 80, 0.5)';
+                    backgroundColor = 'rgba(26, 46, 26, 0.8)';
+                }
+            } else {
+                achievementClass += ' locked';
+            }
+
+            div.className = achievementClass;
             div.style.cssText = `
-                background: ${isUnlocked ? 'rgba(26, 46, 26, 0.8)' : 'rgba(42, 45, 49, 0.6)'};
-                border: 1px solid ${isUnlocked ? 'rgba(76, 175, 80, 0.5)' : 'rgba(255, 255, 255, 0.1)'};
+                background: ${backgroundColor};
+                border: 1px solid ${borderColor};
                 border-radius: 12px;
                 padding: 15px;
                 display: flex;
                 align-items: center;
                 gap: 15px;
                 transition: all 0.3s;
+                position: relative;
             `;
 
             const unlockDate = isUnlocked && ach.unlockTime
-                ? new Date(ach.unlockTime * 1000).toLocaleDateString('fr-FR')
+                ? new Date(ach.unlockTime * 1000).toLocaleDateString('fr-FR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                })
                 : '';
+
+            // Icône selon le statut
+            let icon = '🔒';
+            let iconBg = 'rgba(102, 102, 102, 0.2)';
+            if (isUnlocked) {
+                if (ach.legitimacy?.status === 'cheated') {
+                    icon = '🚫';
+                    iconBg = 'rgba(244, 67, 54, 0.2)';
+                } else if (ach.legitimacy?.status === 'suspicious') {
+                    icon = '⚠️';
+                    iconBg = 'rgba(255, 152, 0, 0.2)';
+                } else {
+                    icon = '🏆';
+                    iconBg = 'rgba(76, 175, 80, 0.2)';
+                }
+            }
 
             div.innerHTML = `
                 <div class="achievement-icon" style="
@@ -357,8 +408,8 @@
                     align-items: center;
                     justify-content: center;
                     border-radius: 50%;
-                    background: ${isUnlocked ? 'rgba(76, 175, 80, 0.2)' : 'rgba(102, 102, 102, 0.2)'};
-                ">${isUnlocked ? '🏆' : '🔒'}</div>
+                    background: ${iconBg};
+                ">${icon}</div>
                 <div class="achievement-info" style="flex: 1;">
                     <h4 style="margin: 0 0 5px 0; color: ${isUnlocked ? '#4CAF50' : '#999'};">
                         ${ach.name || ach.displayName || ach.id}
@@ -368,7 +419,27 @@
                     </p>
                     ${isUnlocked && unlockDate ? `<small style="color: #4CAF50;">Débloqué le ${unlockDate}</small>` : ''}
                     ${ach.globalPercentage ? `<small style="color: #888; display: block;">Rareté: ${ach.globalPercentage.toFixed(1)}% des joueurs</small>` : ''}
+                    ${ach.legitimacy && ach.legitimacy.status !== 'legitimate' ? `
+                        <small style="color: ${ach.legitimacy.status === 'cheated' ? '#f44336' : '#ff9800'}; display: block; margin-top: 5px;">
+                            ️ ${ach.legitimacy.issues.join(' • ')}
+                        </small>
+                    ` : ''}
                 </div>
+                ${ach.legitimacy && isUnlocked ? `
+                    <div style="
+                        position: absolute;
+                        top: 5px;
+                        right: 5px;
+                        background: ${ach.legitimacy.status === 'cheated' ? '#f44336' : ach.legitimacy.status === 'suspicious' ? '#ff9800' : '#4CAF50'};
+                        color: white;
+                        padding: 2px 8px;
+                        border-radius: 4px;
+                        font-size: 11px;
+                        font-weight: bold;
+                    ">
+                        ${ach.legitimacy.score}%
+                    </div>
+                ` : ''}
             `;
 
             container.appendChild(div);
@@ -388,7 +459,7 @@
 
     function testSelectedGame() {
         if (!selectedGame || !selectedUser) {
-            alert(" Veuillez sélectionner un utilisateur et un jeu.");
+            alert("️ Veuillez sélectionner un utilisateur et un jeu.");
             return;
         }
         getAchievements(selectedUser.steamId, selectedGame.appid);
@@ -405,16 +476,14 @@
                 document.getElementById('status').textContent = ` Surveillance activée pour ${selectedGame.name}`;
                 document.getElementById('status').className = "info";
 
-                // Écouter les mises à jour
                 window.steamAPI.onAchievementUnlocked((data) => {
                     if (data.gameId === selectedGame.appid) {
-                        console.log(' Nouveaux succès détectés!');
+                        console.log('🎉 Nouveaux succès détectés!');
                         currentResult = data;
                         currentAchievements = data.achievements;
                         updateStats();
                         renderAchievements();
 
-                        // Notification
                         const notification = document.createElement('div');
                         notification.className = 'notification-popup';
                         notification.innerHTML = `
@@ -466,14 +535,13 @@
         document.getElementById('start-btn').disabled = true;
         document.getElementById('start-btn').setAttribute('aria-disabled', 'true');
 
-        // Réinitialiser les filtres
         document.querySelectorAll('.filter-buttons button').forEach(btn => {
             btn.classList.remove('active');
         });
         document.querySelector('.filter-buttons button').classList.add('active');
 
         displayUsers();
-        document.getElementById('status').textContent = ' Sélectionnez votre compte Steam';
+        document.getElementById('status').textContent = 'Sélectionnez votre compte Steam';
         document.getElementById('status').className = "info";
     }
 
