@@ -86,6 +86,188 @@ class SteamReader {
         return users;
     }
 
+    async getFriendsList(steamId) {
+        if (!this.apiKey) {
+            console.warn('️ Clé API Steam requise pour récupérer la liste d\'amis');
+            return [];
+        }
+
+        try {
+            const url = `https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${this.apiKey}&steamid=${steamId}&relationship=friend`;
+            console.log(` Récupération des amis pour ${steamId}...`);
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.warn(`Erreur API amis: ${response.status}`);
+                return [];
+            }
+
+            const data = await response.json();
+
+            if (!data.friendslist || !data.friendslist.friends) {
+                console.warn('Liste d\'amis vide ou privée');
+                return [];
+            }
+
+            const friends = data.friendslist.friends;
+            console.log(` ${friends.length} amis trouvés`);
+
+            const friendsWithInfo = [];
+            const batchSize = 100;
+
+            for (let i = 0; i < friends.length; i += batchSize) {
+                const batch = friends.slice(i, i + batchSize);
+                const steamIds = batch.map(f => f.steamid).join(',');
+
+                try {
+                    const friendsInfo = await this.getFriendsInfo(steamIds);
+                    if (friendsInfo) {
+                        friendsWithInfo.push(...friendsInfo);
+                    }
+                } catch (err) {
+                    console.error(`Erreur récupération batch ${i}: ${err.message}`);
+                }
+            }
+
+            return friendsWithInfo.map(friend => ({
+                steamId: friend.steamid,
+                personaName: friend.personaname,
+                avatar: friend.avatar,
+                profileState: friend.profilestate,
+                lastLogoff: friend.lastlogoff,
+                personaState: friend.personastate,
+                gameExtraInfo: friend.gameextrainfo || null
+            }));
+
+        } catch (err) {
+            console.error('Erreur récupération liste d\'amis:', err.message);
+            return [];
+        }
+    }
+
+    async getFriendsInfo(steamIds) {
+        if (!this.apiKey) return null;
+
+        try {
+            const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${this.apiKey}&steamids=${steamIds}`;
+            const response = await fetch(url);
+
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            return data.response?.players || [];
+        } catch (err) {
+            console.error('Erreur récupération infos amis:', err.message);
+            return null;
+        }
+    }
+
+    async compareAchievements(steamId1, steamId2, appid) {
+        if (!this.apiKey) {
+            console.warn('️ Clé API Steam requise pour la comparaison');
+            return null;
+        }
+
+        try {
+            console.log(` Comparaison des succès pour le jeu ${appid}...`);
+
+            const [player1Achievements, player2Achievements, gameSchema] = await Promise.all([
+                this.getUserAchievements(steamId1, appid),
+                this.getUserAchievements(steamId2, appid),
+                this.getGameSchema(appid)
+            ]);
+
+            if (!player1Achievements || !player2Achievements) {
+                console.warn('Impossible de récupérer les succès des deux joueurs');
+                return null;
+            }
+
+            const player1Map = new Map();
+            const player2Map = new Map();
+
+            player1Achievements.forEach(ach => {
+                player1Map.set(ach.apiname, ach);
+            });
+
+            player2Achievements.forEach(ach => {
+                player2Map.set(ach.apiname, ach);
+            });
+
+            const comparison = {
+                player1: {
+                    steamId: steamId1,
+                    totalAchievements: player1Achievements.length,
+                    unlockedCount: player1Achievements.filter(a => a.achieved === 1).length
+                },
+                player2: {
+                    steamId: steamId2,
+                    totalAchievements: player2Achievements.length,
+                    unlockedCount: player2Achievements.filter(a => a.achieved === 1).length
+                },
+                achievements: []
+            };
+
+            comparison.player1.percentage = Math.round((comparison.player1.unlockedCount / comparison.player1.totalAchievements) * 100) || 0;
+            comparison.player2.percentage = Math.round((comparison.player2.unlockedCount / comparison.player2.totalAchievements) * 100) || 0;
+
+            const allAchievements = new Set([...player1Map.keys(), ...player2Map.keys()]);
+
+            allAchievements.forEach(apiname => {
+                const ach1 = player1Map.get(apiname);
+                const ach2 = player2Map.get(apiname);
+
+                if (ach1 && ach2) {
+                    const achievement = {
+                        apiname: apiname,
+                        name: ach1.name || ach1.displayName,
+                        description: ach1.description,
+                        percentage: ach1.percentage,
+                        player1: {
+                            achieved: ach1.achieved === 1,
+                            unlockTime: ach1.unlocktime || null,
+                            legitimacy: ach1.legitimacy
+                        },
+                        player2: {
+                            achieved: ach2.achieved === 1,
+                            unlockTime: ach2.unlocktime || null,
+                            legitimacy: ach2.legitimacy
+                        }
+                    };
+
+                    if (achievement.player1.achieved && achievement.player2.achieved) {
+                        achievement.status = 'both';
+                        if (achievement.player1.unlockTime && achievement.player2.unlockTime) {
+                            achievement.firstUnlock = achievement.player1.unlockTime < achievement.player2.unlockTime ? 'player1' : 'player2';
+                        }
+                    } else if (achievement.player1.achieved && !achievement.player2.achieved) {
+                        achievement.status = 'player1_only';
+                    } else if (!achievement.player1.achieved && achievement.player2.achieved) {
+                        achievement.status = 'player2_only';
+                    } else {
+                        achievement.status = 'neither';
+                    }
+
+                    comparison.achievements.push(achievement);
+                }
+            });
+
+            comparison.stats = {
+                bothUnlocked: comparison.achievements.filter(a => a.status === 'both').length,
+                player1Only: comparison.achievements.filter(a => a.status === 'player1_only').length,
+                player2Only: comparison.achievements.filter(a => a.status === 'player2_only').length,
+                neitherUnlocked: comparison.achievements.filter(a => a.status === 'neither').length
+            };
+
+            console.log(` Comparaison terminée: ${comparison.stats.bothUnlocked} communs, ${comparison.stats.player1Only} exclusifs J1, ${comparison.stats.player2Only} exclusifs J2`);
+
+            return comparison;
+
+        } catch (err) {
+            console.error('Erreur lors de la comparaison:', err.message);
+            return null;
+        }
+    }
+
     async getUserGames(steamId64) {
         if (!this.apiKey) {
             console.warn('️ Clé API manquante, récupération locale uniquement');
@@ -93,7 +275,7 @@ class SteamReader {
         }
 
         try {
-            console.log(`📥 Récupération de tous les jeux pour ${steamId64}...`);
+            console.log(` Récupération de tous les jeux pour ${steamId64}...`);
 
             const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${this.apiKey}&steamid=${steamId64}&include_appinfo=true&include_played_free_games=true&format=json`;
 
@@ -123,7 +305,6 @@ class SteamReader {
 
             console.log(` ${games.length} jeux trouvés via l'API`);
 
-            // Marquer les jeux installés localement
             const localGames = this.getLocalGames();
             const localAppIds = new Set(localGames.map(g => g.appid));
 
@@ -283,65 +464,6 @@ class SteamReader {
         }
     }
 
-    checkAchievementLegitimacy(achievement, userStats, gameInfo) {
-        const legitimacy = {
-            score: 100,
-            issues: [],
-            status: 'legitimate'
-        };
-
-        if (userStats && userStats.game_purchase_time && achievement.unlocktime < userStats.game_purchase_time) {
-            legitimacy.score -= 100;
-            legitimacy.issues.push('Débloqué avant l\'achat du jeu');
-            legitimacy.status = 'cheated';
-            return legitimacy;
-        }
-
-        if (userStats && userStats.playtime_at_unlock !== undefined && userStats.playtime_at_unlock === 0) {
-            legitimacy.score -= 50;
-            legitimacy.issues.push('Débloqué avec 0 minute de jeu');
-        }
-
-        if (userStats && userStats.achievements_timeline) {
-            const unlockTime = achievement.unlocktime;
-            const nearbyUnlocks = userStats.achievements_timeline.filter(time =>
-                Math.abs(time - unlockTime) < 60
-            );
-
-            if (nearbyUnlocks.length > 10) {
-                legitimacy.score -= 40;
-                legitimacy.issues.push(`${nearbyUnlocks.length} succès débloqués en même temps`);
-            } else if (nearbyUnlocks.length > 5) {
-                legitimacy.score -= 20;
-                legitimacy.issues.push(`${nearbyUnlocks.length} succès débloqués rapidement`);
-            }
-        }
-
-        if (achievement.percentage && achievement.percentage < 0.1) {
-            if (userStats && userStats.playtime_at_unlock < 60) { // Moins d'1h de jeu
-                legitimacy.score -= 30;
-                legitimacy.issues.push('Succès très rare débloqué trop tôt');
-            }
-        }
-
-        const unlockSecond = achievement.unlocktime % 60;
-        if (userStats && userStats.unlock_seconds_pattern) {
-            const sameSecondCount = userStats.unlock_seconds_pattern[unlockSecond] || 0;
-            if (sameSecondCount > 20) {
-                legitimacy.score -= 50;
-                legitimacy.issues.push('Pattern de déblocage suspect (même seconde)');
-            }
-        }
-
-        if (legitimacy.score <= 0) {
-            legitimacy.status = 'cheated';
-            legitimacy.score = 0;
-        } else if (legitimacy.score < 70) {
-            legitimacy.status = 'suspicious';
-        }
-
-        return legitimacy;
-    }
     async getUserGameStats(steamId, appid) {
         try {
             const [achievementsRes, ownedGamesRes] = await Promise.all([
@@ -360,31 +482,141 @@ class SteamReader {
             const ownedGames = ownedGamesData?.response?.games || [];
 
             const targetGame = ownedGames.find(game => game.appid.toString() === appid.toString());
-            const playtime_at_unlock = targetGame?.playtime_forever || 0;
+            const totalPlaytime = targetGame?.playtime_forever || 0;
 
             const unlockTimes = playerAchievements
-                .filter(a => a.achieved === 1 && a.unlocktime)
-                .map(a => a.unlocktime);
+                .filter(a => a.achieved === 1 && a.unlocktime && a.unlocktime > 0)
+                .map(a => a.unlocktime)
+                .sort((a, b) => a - b);
+
+            console.log(` Statistiques pour ${appid}: ${unlockTimes.length} succès débloqués sur ${playerAchievements.length} total`);
 
             const unlock_seconds_pattern = {};
-            for (const ts of unlockTimes) {
-                const second = ts % 60;
+            for (const timestamp of unlockTimes) {
+                const second = timestamp % 60;
                 unlock_seconds_pattern[second] = (unlock_seconds_pattern[second] || 0) + 1;
             }
 
-            const game_purchase_time = unlockTimes.length ? unlockTimes[0] - 1800 : null;
+            const groupedUnlocks = {};
+            for (const timestamp of unlockTimes) {
+                const minute = Math.floor(timestamp / 60); // Grouper par minute
+                if (!groupedUnlocks[minute]) {
+                    groupedUnlocks[minute] = [];
+                }
+                groupedUnlocks[minute].push(timestamp);
+            }
+
+            const simultaneousGroups = Object.values(groupedUnlocks)
+                .filter(group => group.length > 1)
+                .sort((a, b) => b.length - a.length);
 
             return {
-                playtime_at_unlock,
+                totalPlaytime,
                 achievements_timeline: unlockTimes,
                 unlock_seconds_pattern,
-                game_purchase_time
+                simultaneousGroups,
+                totalAchievements: playerAchievements.length,
+                unlockedCount: unlockTimes.length
             };
 
         } catch (err) {
             console.error('Erreur récupération des stats utilisateur:', err.message);
             return null;
         }
+    }
+
+    checkAchievementLegitimacy(achievement, userStats, gameInfo) {
+        const legitimacy = {
+            score: 100,
+            issues: [],
+            status: 'legitimate'
+        };
+
+        if (!userStats || !achievement.unlocktime) {
+            return legitimacy;
+        }
+
+        if (userStats.totalPlaytime < 60 && userStats.unlockedCount > 20) {
+            legitimacy.score -= 40;
+            legitimacy.issues.push(`${userStats.unlockedCount} succès en ${userStats.totalPlaytime} min de jeu`);
+        }
+
+        const unlockTime = achievement.unlocktime;
+        const unlockMinute = Math.floor(unlockTime / 60);
+
+        const sameMinuteUnlocks = userStats.achievements_timeline.filter(time =>
+            Math.floor(time / 60) === unlockMinute
+        ).length;
+
+        if (sameMinuteUnlocks > 15) {
+            legitimacy.score -= 80;
+            legitimacy.issues.push(`${sameMinuteUnlocks} succès débloqués en 1 minute`);
+        } else if (sameMinuteUnlocks > 10) {
+            legitimacy.score -= 60;
+            legitimacy.issues.push(`${sameMinuteUnlocks} succès débloqués simultanément`);
+        } else if (sameMinuteUnlocks > 5) {
+            legitimacy.score -= 30;
+            legitimacy.issues.push(`${sameMinuteUnlocks} succès débloqués rapidement`);
+        }
+
+        const nearbyUnlocks = userStats.achievements_timeline.filter(time =>
+            Math.abs(time - unlockTime) <= 300 // 5 minutes
+        ).length;
+
+        if (nearbyUnlocks > 25) {
+            legitimacy.score -= 50;
+            legitimacy.issues.push(`${nearbyUnlocks} succès en 5 minutes`);
+        }
+
+        const unlockSecond = unlockTime % 60;
+        const sameSecondCount = userStats.unlock_seconds_pattern[unlockSecond] || 0;
+
+        if (sameSecondCount > 20) {
+            legitimacy.score -= 70;
+            legitimacy.issues.push(`${sameSecondCount} succès à la seconde ${unlockSecond}`);
+        } else if (sameSecondCount > 10) {
+            legitimacy.score -= 40;
+            legitimacy.issues.push(`Pattern suspect (seconde ${unlockSecond})`);
+        }
+
+        if (achievement.percentage && achievement.percentage < 0.5) {
+            const achievementIndex = userStats.achievements_timeline.indexOf(unlockTime);
+            if (achievementIndex < 5) {
+                legitimacy.score -= 35;
+                legitimacy.issues.push(`Succès très rare (${achievement.percentage.toFixed(2)}%) débloqué trop tôt`);
+            }
+        }
+
+        if (userStats.achievements_timeline.length > 10) {
+            const firstUnlock = userStats.achievements_timeline[0];
+            const lastUnlock = userStats.achievements_timeline[userStats.achievements_timeline.length - 1];
+            const timeSpan = lastUnlock - firstUnlock;
+
+            if (timeSpan < 300 && userStats.achievements_timeline.length > 15) {
+                legitimacy.score -= 60;
+                legitimacy.issues.push(`${userStats.achievements_timeline.length} succès en ${Math.floor(timeSpan/60)} minutes`);
+            }
+        }
+
+        if (userStats.simultaneousGroups && userStats.simultaneousGroups.length > 0) {
+            const biggestGroup = userStats.simultaneousGroups[0].length;
+            if (biggestGroup > 20) {
+                legitimacy.score -= 90;
+                legitimacy.issues.push(`${biggestGroup} succès débloqués exactement en même temps`);
+            } else if (biggestGroup > 10) {
+                legitimacy.score -= 50;
+                legitimacy.issues.push(`${biggestGroup} succès débloqués simultanément`);
+            }
+        }
+
+        if (legitimacy.score <= 10) {
+            legitimacy.status = 'cheated';
+            legitimacy.score = 0;
+        } else if (legitimacy.score <= 40) {
+            legitimacy.status = 'suspicious';
+        }
+
+        return legitimacy;
     }
 
     async getGameInfo(appid) {
@@ -493,7 +725,5 @@ class SteamReader {
         }
     }
 }
-
-
 
 module.exports = SteamReader;

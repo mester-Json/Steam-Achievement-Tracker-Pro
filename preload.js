@@ -21,6 +21,7 @@ try {
 
         getUserGames: (userId) => ipcRenderer.invoke('get-user-games', userId),
 
+
         getAchievements: (userId, gameId) => {
             console.log('getAchievements appelée', userId, gameId);
             return ipcRenderer.invoke('get-achievements', userId, gameId);
@@ -28,7 +29,10 @@ try {
         
         onAchievementUnlocked: (callback) => {
             return ipcRenderer.on('achievement-unlocked', (event, data) => callback(data));
-        }
+        },
+
+        getFriendsList: (steamId) => ipcRenderer.invoke('get-friends-list', steamId),
+        compareAchievements: (steamId1, steamId2, appId) => ipcRenderer.invoke('compare-achievements', steamId1, steamId2, appId)
     });
     
     console.log('contextBridge.exposeInMainWorld terminé avec succès');

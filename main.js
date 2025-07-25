@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const SteamReader = require('./steam-reader'); // Classe SteamReader
+const SteamReader = require('./steam-reader');
 
 console.log('Main process démarré !');
 
@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
     console.log(' Chemin Steam détecté:', steamReader.steamPath);
 
     try {
-        const testSteamId64 = '76561198006409530'; // exemple
+        const testSteamId64 = '76561198006409530';
         const userInfo = await steamReader.fetchSteamUserInfo(testSteamId64);
         console.log('Test API Steam user info:', userInfo);
     } catch (err) {
@@ -70,9 +70,9 @@ ipcMain.handle('get-steam-users', async () => {
 ipcMain.handle('get-user-games', async (event, userId) => {
     try {
         ensureSteamReader();
-        console.log(' get-user-games appelé pour:', userId);
+        console.log('🎮 get-user-games appelé pour:', userId);
         const games = await steamReader.getUserGames(userId);
-        console.log(`${games.length} jeux trouvés`);
+        console.log(` ${games.length} jeux trouvés`);
         return games;
     } catch (err) {
         console.error(err);
@@ -97,7 +97,7 @@ ipcMain.handle('get-achievements', async (event, userId, gameId) => {
             };
         }
 
-        console.log(` ${achievements.length} succès trouvés depuis l'API`);
+        console.log(`${achievements.length} succès trouvés depuis l'API`);
 
         console.log(' Exemples de succès reçus:');
         achievements.slice(0, 3).forEach((ach, i) => {
@@ -114,7 +114,7 @@ ipcMain.handle('get-achievements', async (event, userId, gameId) => {
                 name: ach.name || ach.apiname,
                 description: ach.description || '',
                 achieved: isAchieved,
-                unlocked: isAchieved, // Pour compatibilité avec le frontend
+                unlocked: isAchieved,
                 unlockTime: ach.unlocktime || null,
                 displayName: ach.name || ach.apiname,
                 globalPercentage: ach.percentage || 0,
@@ -122,7 +122,7 @@ ipcMain.handle('get-achievements', async (event, userId, gameId) => {
             };
 
             if (ach.legitimacy && ach.legitimacy.status !== 'legitimate') {
-                console.log(` Succès suspect détecté: ${ach.name}`);
+                console.log(`️ Succès suspect détecté: ${ach.name}`);
                 console.log(`   Status: ${ach.legitimacy.status}`);
                 console.log(`   Score: ${ach.legitimacy.score}/100`);
                 console.log(`   Problèmes: ${ach.legitimacy.issues.join(', ')}`);
@@ -155,6 +155,83 @@ ipcMain.handle('get-achievements', async (event, userId, gameId) => {
     }
 });
 
+
+ipcMain.handle('get-friends-list', async (event, steamId) => {
+    try {
+        ensureSteamReader();
+        console.log(' get-friends-list appelé pour:', steamId);
+
+        const friends = await steamReader.getFriendsList(steamId);
+        console.log(` ${friends.length} amis trouvés`);
+
+        const formattedFriends = friends.map(friend => ({
+            steamId: friend.steamId,
+            personaName: friend.personaName,
+            avatar: friend.avatar,
+            profileState: friend.profileState,
+            lastLogoff: friend.lastLogoff,
+            personaState: friend.personaState,
+            gameExtraInfo: friend.gameExtraInfo
+        }));
+
+        return formattedFriends;
+    } catch (err) {
+        console.error(' Erreur get-friends-list:', err);
+        return [];
+    }
+});
+
+ipcMain.handle('compare-achievements', async (event, steamId1, steamId2, appId) => {
+    try {
+        ensureSteamReader();
+        console.log(' compare-achievements appelé');
+        console.log(`   Joueur 1: ${steamId1}`);
+        console.log(`   Joueur 2: ${steamId2}`);
+        console.log(`   Jeu: ${appId}`);
+
+        console.log(' Test de récupération des succès individuels...');
+
+        const [player1Achievements, player2Achievements] = await Promise.all([
+            steamReader.getUserAchievements(steamId1, appId),
+            steamReader.getUserAchievements(steamId2, appId)
+        ]);
+
+        console.log('Succès joueur 1:', player1Achievements ? player1Achievements.length : 'null');
+        console.log('Succès joueur 2:', player2Achievements ? player2Achievements.length : 'null');
+
+        if (!player1Achievements) {
+            console.error(' Impossible de récupérer les succès du joueur 1');
+            return { error: 'Impossible de récupérer vos succès pour ce jeu' };
+        }
+
+        if (!player2Achievements) {
+            console.error(' Impossible de récupérer les succès du joueur 2');
+            return { error: 'Impossible de récupérer les succès de votre ami pour ce jeu (profil privé?)' };
+        }
+
+        console.log('Succès récupérés avec succès, lancement de la comparaison...');
+
+        const comparison = await steamReader.compareAchievements(steamId1, steamId2, appId);
+
+        if (!comparison) {
+            console.log('Impossible de comparer les succès');
+            return { error: 'Erreur lors de la comparaison des succès' };
+        }
+
+        console.log(' Comparaison terminée:');
+        console.log(`   Joueur 1: ${comparison.player1?.unlockedCount || 0}/${comparison.player1?.totalAchievements || 0} (${comparison.player1?.percentage || 0}%)`);
+        console.log(`   Joueur 2: ${comparison.player2?.unlockedCount || 0}/${comparison.player2?.totalAchievements || 0} (${comparison.player2?.percentage || 0}%)`);
+        console.log(`   Statistiques: ${comparison.stats?.bothUnlocked || 0} communs, ${comparison.stats?.player1Only || 0} exclusifs J1, ${comparison.stats?.player2Only || 0} exclusifs J2`);
+        console.log(`   Nombre d'achievements dans la comparaison: ${comparison.achievements?.length || 0}`);
+
+        return comparison;
+    } catch (err) {
+        console.error(' Erreur compare-achievements:', err);
+        return { error: err.message };
+    }
+});
+
+
 ipcMain.handle('start-watching', async (event, userId, gameId) => {
     try {
         ensureSteamReader();
@@ -167,7 +244,6 @@ ipcMain.handle('start-watching', async (event, userId, gameId) => {
                 return;
             }
 
-            // Formatter et envoyer les données
             const formattedAchievements = achievements.map(ach => ({
                 id: ach.apiname,
                 name: ach.name || ach.apiname,
@@ -203,7 +279,7 @@ ipcMain.handle('start-watching', async (event, userId, gameId) => {
 ipcMain.handle('fetch-steam-user-info', async (event, steamId64) => {
     try {
         ensureSteamReader();
-        console.log(' fetch-steam-user-info appelé pour:', steamId64);
+        console.log('️ fetch-steam-user-info appelé pour:', steamId64);
         if (!steamReader.apiKey) {
             return { error: 'Clé API Steam non définie' };
         }
